@@ -1,180 +1,201 @@
 package mockhttp_test
 
 import (
-	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
 	"github.com/sachsry/mockhttp/v1/mockhttp"
+	"github.com/sachsry/mockhttp/v1/response"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestHandleEmptySuccess(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
+func TestRawResponse_New(t *testing.T) {
+	res := mockhttp.NewRawResponse()
+	assert.NotNil(t, res)
+
+	res = res.WithStatus(300)
+	assert.Equal(t, 300, res.Status())
+	assert.Equal(t, "", res.Body())
+}
+
+func TestRawResponse_SuccessHandler(t *testing.T) {
+	httpReq := mockhttp.NewRequest("GET", "/", "")
+	successHandler(httpReq.W, httpReq.R)
+
+	res, err := mockhttp.ToResponse(httpReq.Result())
+	if err != nil {
+		t.Fatalf("expected error to be nil, but found an error: %v", err.Error())
 	}
 
-	r := mockhttp.NewRequest("GET", "/example", "")
-	handler(r.W, r.R)
+	assert.Equal(t, 200, res.Status())
+	assert.Equal(t, `{"status":"ok"}`, res.Body())
+}
 
-	result, err := mockhttp.ToResponse[any](r.W.Result())
+func TestRawResponse_FailureHandler(t *testing.T) {
+	httpReq := mockhttp.NewRequest("GET", "/", "")
+	failHandler(httpReq.W, httpReq.R)
+
+	res, err := mockhttp.ToResponse(httpReq.Result())
+	if err != nil {
+		t.Fatalf("expected error to be nil, but found an error: %v", err.Error())
+	}
+
+	assert.Equal(t, 400, res.Status())
+	assert.Equal(t, `{"message":"something bad","status":"bad request"}`, res.Body())
+}
+
+func TestJSONResponse_New(t *testing.T) {
+	res := mockhttp.NewJSONResponse[response.StatusStruct]()
+	res = res.WithSuccess(&response.StatusStruct{Status: "ok"})
+
+	assert.Equal(t, 200, res.Status())
+	assert.Equal(t, "ok", res.Val.Status)
+
+	res = res.WithStatus(222)
+	assert.Equal(t, 222, res.Status())
+}
+
+func TestJSONResponse_SuccessHandler(t *testing.T) {
+	httpReq := mockhttp.NewRequest("GET", "/", "")
+	successHandler(httpReq.W, httpReq.R)
+
+	res, err := mockhttp.ToJSONResponse[response.StatusStruct](httpReq.Result())
+
+	assert.Nil(t, err)
+	assert.NotNil(t, res)
+	assert.Equal(t, `{"status":"ok"}`, res.Body())
+	assert.Equal(t, "ok", res.Val.Status)
+}
+
+func TestJSONResponse_FailureHandler(t *testing.T) {
+	httpReq := mockhttp.NewRequest("GET", "/", "")
+	failHandler(httpReq.W, httpReq.R)
+
+	res, err := mockhttp.ToJSONResponse[mockhttp.ServerError](httpReq.Result())
+
+	assert.Nil(t, err)
+	assert.NotNil(t, res)
+	assert.Equal(t, `{"message":"something bad","status":"bad request"}`, res.Body())
+	assert.Equal(t, "something bad", res.Val.DebugMessage)
+	assert.Equal(t, "bad request", res.Val.Status)
+}
+
+func TestJSONResponse_NoBodyError(t *testing.T) {
+	httpReq := mockhttp.NewRequest("GET", "/", "")
+	nothingHandler(httpReq.W, httpReq.R)
+
+	res, err := mockhttp.ToJSONResponse[mockhttp.ServerError](httpReq.Result())
+
+	assert.Nil(t, res)
+	assert.Equal(t, "expected a payload in the response body, but got an empty string", err.Error())
+}
+
+func TestJSONResponse_UnmarshalError(t *testing.T) {
+	httpReq := mockhttp.NewRequest("GET", "/", "")
+	failHandler(httpReq.W, httpReq.R)
+
+	res, err := mockhttp.ToJSONResponse[struct {
+		Status int `json:"status"`
+	}](httpReq.Result())
+
+	assert.Nil(t, res)
+	assert.Equal(t, "json: cannot unmarshal string into Go struct field .status of type int", err.Error())
+}
+
+func TestJSONResponse_ValidationFunc_Success(t *testing.T) {
+	expected := mockhttp.NewJSONResponse[response.StatusStruct]().
+		WithSuccess(&response.StatusStruct{Status: "ok"}).
+		WithValidationFunc(func(expected, result response.StatusStruct) error {
+			if expected.Status != result.Status {
+				return fmt.Errorf("unexpected status found in result: %v", result.Status)
+			}
+			return nil
+		})
+
+	httpReq := mockhttp.NewRequest("GET", "/", "")
+	successHandler(httpReq.W, httpReq.R)
+	result, err := mockhttp.ToJSONResponse[response.StatusStruct](httpReq.Result())
 
 	assert.Nil(t, err)
 	assert.NotNil(t, result)
-	assert.Equal(t, result.Status, 200)
+
+	validationErr := expected.Validate(result)
+	assert.Nil(t, validationErr)
 }
 
-type temp struct {
-	I   int    `json:"i"`
-	Str string `json:"str"`
-}
+func TestJSONResponse_ValidationFunc_ServerError(t *testing.T) {
+	expected := mockhttp.NewJSONResponse[mockhttp.ServerError]().
+		WithFailure(400, &mockhttp.ServerError{
+			Status:       "bad request",
+			DebugMessage: "something bad",
+		}).
+		WithValidationFunc(mockhttp.ValidateErrors)
 
-func TestHandleSuccessWithStruct(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		s := temp{I: 14, Str: "suh"}
-		bs, err := json.Marshal(s)
-		if err != nil {
-			panic("unexpected error occurred during test")
-		}
-		w.WriteHeader(200)
-		w.Write(bs)
-	}
-
-	r := mockhttp.NewRequest("GET", "/example", "")
-	handler(r.W, r.R)
-
-	result, err := mockhttp.ToResponse[temp](r.W.Result())
+	httpReq := mockhttp.NewRequest("GET", "/", "")
+	failHandler(httpReq.W, httpReq.R)
+	result, err := mockhttp.ToJSONResponse[mockhttp.ServerError](httpReq.Result())
 
 	assert.Nil(t, err)
-	assert.Equal(t, result.Status, 200)
-	assert.Equal(t, 14, result.Struct.I)
-	assert.Equal(t, "suh", result.Struct.Str)
+	assert.NotNil(t, result)
+
+	validationErr := expected.Validate(result)
+	assert.Nil(t, validationErr)
 }
 
-func TestHandleSuccessWithMap(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		s := map[string]string{
-			"a": "alpha",
-			"b": "beta",
-		}
-		bs, err := json.Marshal(s)
-		if err != nil {
-			panic("unexpected error occurred during test")
-		}
-		w.WriteHeader(200)
-		w.Write(bs)
-	}
+func TestValidate_NullExpected(t *testing.T) {
+	var expected *mockhttp.JSONResponse[any]
 
-	r := mockhttp.NewRequest("GET", "/example", "")
-	handler(r.W, r.R)
+	err := expected.Validate(nil)
 
-	result, err := mockhttp.ToResponse[map[string]string](r.W.Result())
-
-	assert.Nil(t, err)
-	assert.Equal(t, result.Status, 200)
-	assert.NotNil(t, result.Struct)
-
-	rmap := *result.Struct
-	assert.Equal(t, "alpha", rmap["a"])
-	assert.Equal(t, "beta", rmap["b"])
-}
-
-func TestHandleSuccessWithSlice(t *testing.T) {
-	s := []temp{
-		{I: 1, Str: "one"},
-		{I: 2, Str: "two"},
-		{I: 3, Str: "three"},
-	}
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		bs, err := json.Marshal(s)
-		if err != nil {
-			panic("unexpected error occurred during test")
-		}
-		w.WriteHeader(200)
-		w.Write(bs)
-	}
-
-	r := mockhttp.NewRequest("GET", "/example", "")
-	handler(r.W, r.R)
-
-	result, err := mockhttp.ToResponse[[]temp](r.W.Result())
-
-	assert.Nil(t, err)
-	assert.Equal(t, result.Status, 200)
-	assert.NotNil(t, result.Struct)
-
-	rstruct := *result.Struct
-	assert.Equal(t, 3, len(rstruct))
-	for i := 0; i < len(s); i++ {
-		assert.Equal(t, s[i].I, rstruct[i].I)
-		assert.Equal(t, s[i].Str, rstruct[i].Str)
-	}
-}
-
-func TestUnmarshalError(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		s := temp{I: 14, Str: "suh"}
-		bs, err := json.Marshal(s)
-		if err != nil {
-			panic("unexpected error occurred during test")
-		}
-		w.WriteHeader(200)
-		w.Write(bs)
-	}
-
-	r := mockhttp.NewRequest("GET", "/example", "")
-	handler(r.W, r.R)
-
-	result, err := mockhttp.ToResponse[[]temp](r.W.Result())
-
-	assert.Nil(t, result)
 	assert.NotNil(t, err)
-	assert.Equal(t, err.Error(), "json: cannot unmarshal object into Go value of type []mockhttp_test.temp")
+	assert.Equal(t, "receiver expected should not be nil", err.Error())
 }
 
-func TestHandleEmptyFailure(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(500)
-	}
+func TestValidate_NullResult(t *testing.T) {
+	var expected mockhttp.JSONResponse[any]
 
-	r := mockhttp.NewRequest("GET", "/example", "")
-	handler(r.W, r.R)
+	err := expected.Validate(nil)
 
-	result, err := mockhttp.ToResponse[any](r.W.Result())
-
-	assert.Nil(t, err)
-	assert.NotNil(t, result)
-	assert.Equal(t, result.Status, 500)
-	assert.Nil(t, result.Struct)
+	assert.NotNil(t, err)
+	assert.Equal(t, "parameter result should not be nil", err.Error())
 }
 
-func TestHandleFailureWithStruct(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(500)
-		se := mockhttp.ServerError{
-			Status:       "internal error",
-			DebugMessage: "something went wrong",
-		}
-		bs, err := json.Marshal(se)
-		if err != nil {
-			panic("unexpected error occurred in test")
-		}
-		w.Write(bs)
-	}
+func TestValidate_Error(t *testing.T) {
+	expected := mockhttp.NewJSONResponse[response.StatusStruct]().
+		WithSuccess(&response.StatusStruct{Status: "ok"}).
+		WithValidationFunc(func(expected, result response.StatusStruct) error {
+			if expected.Status != result.Status {
+				return fmt.Errorf("unexpected status found in result: %v", result.Status)
+			}
+			return nil
+		})
+	result := mockhttp.NewJSONResponse[response.StatusStruct]().
+		WithSuccess(&response.StatusStruct{Status: "not ok"})
 
-	r := mockhttp.NewRequest("GET", "/example", "")
-	handler(r.W, r.R)
+	err := expected.Validate(result)
 
-	result, err := mockhttp.ToResponse[any](r.W.Result())
-
-	assert.Nil(t, err)
-	assert.NotNil(t, result)
-	assert.Equal(t, result.Status, 500)
-	assert.Nil(t, result.Struct)
-
-	var se mockhttp.ServerError
-	err = result.UnmarshalError(&se)
-	assert.Nil(t, err)
-	assert.Equal(t, "internal error", se.Status)
-	assert.Equal(t, "something went wrong", se.DebugMessage)
+	assert.NotNil(t, err)
+	assert.Equal(t, "unexpected status found in result: not ok", err.Error())
 }
+
+func TestValidate_NoValidationFunc(t *testing.T) {
+	expected := mockhttp.NewJSONResponse[response.StatusStruct]().
+		WithSuccess(&response.StatusStruct{Status: "ok"})
+	result := mockhttp.NewJSONResponse[response.StatusStruct]().
+		WithSuccess(&response.StatusStruct{Status: "not ok"})
+
+	err := expected.Validate(result)
+
+	assert.Nil(t, err)
+}
+
+func successHandler(w http.ResponseWriter, r *http.Request) {
+	response.Success(w)
+}
+
+func failHandler(w http.ResponseWriter, r *http.Request) {
+	response.Error(w, 400, "something bad", nil)
+}
+
+func nothingHandler(w http.ResponseWriter, r *http.Request) {}

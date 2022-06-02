@@ -54,3 +54,7 @@ func (r *Request) SetHeader(key, value string) *Request {
 	r.R.Header.Set(key, value)
 	return r
 }
+
+func (r *Request) Result() *http.Response {
+	return r.W.Result()
+}
