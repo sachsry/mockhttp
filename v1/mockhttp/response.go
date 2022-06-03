@@ -35,6 +35,11 @@ func (r *RawResponse) WithStatus(status int) *RawResponse {
 	return r
 }
 
+func (r *RawResponse) WithBody(body string) *RawResponse {
+	r.body = body
+	return r
+}
+
 type JSONResponse[T any] struct {
 	status         int
 	body           string
