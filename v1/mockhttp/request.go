@@ -3,11 +3,28 @@ package mockhttp
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 
 	"github.com/go-chi/chi"
 )
+
+type PathParamType int64
+
+const (
+	Chi PathParamType = iota
+	// TODO: add support
+	// Mux
+)
+
+func (s PathParamType) String() string {
+	switch s {
+	case Chi:
+		return "chi"
+	}
+	return "unknown"
+}
 
 type Request struct {
 	W *httptest.ResponseRecorder
@@ -20,6 +37,10 @@ func NewRequest(method, path, body string) *Request {
 		W: httptest.NewRecorder(),
 		R: httptest.NewRequest(method, path, bytes.NewBuffer([]byte(body))),
 	}
+}
+
+func (r *Request) Context() context.Context {
+	return r.R.Context()
 }
 
 func (r *Request) WithContext(ctx context.Context) *Request {
@@ -38,7 +59,18 @@ func (r *Request) WithValues(vals map[string]interface{}) *Request {
 }
 
 // With path params sets path params for the request
-func (r *Request) WithPathParams(vals map[string]string) *Request {
+// The PathParamType denotes the routing package used to store path params
+func (r *Request) WithPathParams(ptype PathParamType, vals map[string]string) *Request {
+	switch ptype {
+	case Chi:
+		return r.withChiPathParams(vals)
+	default:
+		fmt.Println("Path param type not supported:", ptype.String())
+		return r
+	}
+}
+
+func (r *Request) withChiPathParams(vals map[string]string) *Request {
 	ctx := r.R.Context()
 	rctx := chi.NewRouteContext()
 	for key, val := range vals {
@@ -53,4 +85,17 @@ func (r *Request) WithPathParams(vals map[string]string) *Request {
 func (r *Request) SetHeader(key, value string) *Request {
 	r.R.Header.Set(key, value)
 	return r
+}
+
+// WithHeaders sets HTTP Header for wrapper object
+func (r *Request) WithHeaders(vals map[string]string) *Request {
+	for key, value := range vals {
+		r.R.Header.Set(key, value)
+	}
+	return r
+}
+
+// Result returns the *http.Response associated with the Http Request
+func (r *Request) Result() *http.Response {
+	return r.W.Result()
 }

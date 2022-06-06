@@ -8,9 +8,15 @@ type ServerError struct {
 	Error        string `json:"error"`
 }
 
-func (s *ServerError) toString() string {
-	if s == nil {
-		return ""
+func ValidateErrors(expected, result ServerError) error {
+	if expected.Status != result.Status {
+		return fmt.Errorf("expected status: %s, but got %s", expected.Status, result.Status)
 	}
-	return fmt.Sprintf("Status: (%s)\nDebugMessage: (%s)\nError: (%s)", s.Status, s.DebugMessage, s.Error)
+	if expected.DebugMessage != result.DebugMessage {
+		return fmt.Errorf("expected message: %s, but got %s", expected.DebugMessage, result.DebugMessage)
+	}
+	if expected.Error != result.Error {
+		return fmt.Errorf("expected error: %s, but got %s", expected.Error, result.Error)
+	}
+	return nil
 }
