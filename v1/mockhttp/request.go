@@ -87,6 +87,14 @@ func (r *Request) SetHeader(key, value string) *Request {
 	return r
 }
 
+// WithHeaders sets HTTP Header for wrapper object
+func (r *Request) WithHeaders(vals map[string]string) *Request {
+	for key, value := range vals {
+		r.R.Header.Set(key, value)
+	}
+	return r
+}
+
 // Result returns the *http.Response associated with the Http Request
 func (r *Request) Result() *http.Response {
 	return r.W.Result()

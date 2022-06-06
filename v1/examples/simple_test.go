@@ -34,6 +34,8 @@ func TestSimpleHandler(t *testing.T) {
 	}
 }
 
+// This handler sends a 200 if the length of the path is even, and a 500 if not.
+// For example, for a request mockhttp.NewRequest("GET", "/hello", ""), "/hello" is the path
 func handleSimple(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	if len(path)%2 != 0 {
