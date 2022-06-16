@@ -147,7 +147,7 @@ expected := mockhttp.NewJSONResponse[mockhttp.ServerError]().
 		})
 ```
 ### Table test your API
-In the (simple)[https://github.com/sachsry/mockhttp/blob/main/v1/examples/simple_test.go] example, see how the API makes for easy table testing.
+In the [simple](https://github.com/sachsry/mockhttp/blob/main/v1/examples/simple_test.go) example, see how the API makes for easy table testing.
 ```
 func TestSimpleHandler(t *testing.T) {
 	tests := []mockhttp.TestStruct{ // Use the built in TestStruct for simpler testing scenarios
@@ -186,6 +186,73 @@ func handleSimple(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-### ADVANCED: Use validation functions for easy, reusable response validation
+### ADVANCED: Use validation functions for reusable response validation
+In the [context](https://github.com/sachsry/mockhttp/blob/main/v1/examples/simple_test.go) example, you can see the two flavors of validation functions during test definitions. You can predefine a function that takes two values and returns an error, or you can define the function inline. Both of these are shown below:
+```
+// Define my own test struct so I can perform validations
+// on both success and failure responses from my api
+type myTestStruct[S, E any] struct {
+	Name    string
+	Input   *mockhttp.Request
+	Success *mockhttp.JSONResponse[S]
+	Error   *mockhttp.JSONResponse[E]
+}
 
-### ADVANCED: Create your own custom test struct to override service implementationx  
+func TestErrorsWithContext(t *testing.T) {
+	tests := []myTestStruct[contextStruct, mockhttp.ServerError]{
+		{
+			Name:  "no_id_in_context",
+			Input: mockhttp.NewRequest("GET", "/", ""),
+			Error: mockhttp.NewJSONResponse[mockhttp.ServerError]().
+				WithFailure(400, &mockhttp.ServerError{
+					Status:       "bad request",
+					DebugMessage: "expected an id of type int in context",
+				}).
+				// You can use a predefined validation function, or... (see below)
+				WithValidationFunc(mockhttp.ValidateErrors),
+		},
+		{
+			Name: "success",
+			Input: mockhttp.NewRequest("GET", "/", "").
+				WithValues(map[string]interface{}{
+					"id":   123,
+					"city": "Dallas",
+				}),
+			Success: mockhttp.NewJSONResponse[contextStruct]().
+				WithSuccess(&contextStruct{
+					ID:   123,
+					City: "Dallas",
+				}).
+				// You can define in line validations for tests
+				WithValidationFunc(func(expected, result contextStruct) error {
+					if expected.ID != result.ID || expected.City != result.City {
+						return errors.New("unexpected result")
+					}
+					return nil
+				}),
+		},
+	}
+```
+The JSONResponse type has a built in `Validate` function that allows you to centralize validation logic into one place. For different test cases, you may want to perform different validations. 
+### ADVANCED: Create your own custom test struct to override service implementation
+One thing you may find yourself needing to do is mock out interface behavior for your http handlers. I highly recommend using the [counterfeiter](https://github.com/maxbrunsfeld/counterfeiter) package to do this. One of the main benefits of using this package is that it provides default values for each function instead of automatically panicking if you don't provide a `someService.On("...").Return(...)` clause. You can, however, use testify to perform interface mocks and the concepts exemplified will still apply.
+
+To get the most out of it, take a read through the whole test example, but for a sneak peak here is what the tests look like:
+```
+tests := []myMockTestStruct{
+		{
+			Name:     "happy_path",
+			Input:    mockhttp.NewRequest("GET", "/", ""),
+			Expected: mockhttp.NewRawResponse().WithStatus(200),
+			// No overriding needed for the happy path because counterfeiter library has defaults
+		},
+		{
+			Name:     "sad_path",
+			Input:    mockhttp.NewRequest("GET", "/", ""),
+			Expected: mockhttp.NewRawResponse().WithStatus(500),
+			OverrideMocks: func(m mocks) {
+				m.fs.UpdateProfileReturns(errors.New("something bad"))
+			},
+		},
+	}
+```
